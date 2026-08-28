@@ -1,5 +1,7 @@
 # dsh-cap-profile
 
+**语言 / Language: [中文](README.md) | [English](README.en.md)**
+
 模型能力画像面板——DSH（DeepSeek Harness）插件。
 
 ![面板截图](screenshots/cap-profile-panel.png)
@@ -21,20 +23,33 @@
 
 ## 安装
 
+在 DSH 的 web profile 目录（profile 的 `package.json` 所在目录，默认 `~/.dsh/profiles/web`）执行：
+
 ```bash
-pnpm add dsh-cap-profile
-# 或本地开发
-dsh web --patch ./cordis.patch.yml --port 3090
+cd ~/.dsh/profiles/web
+pnpm add github:Ansonfishing/dsh-cap-profile
 ```
 
-安装后在会话视图 tab 列出现「能力画像」tab（order 40）。数据来自当前用户 `~/.dsh/sessions`；首次打开触发后台首扫（大历史约 20s 级），期间显示 mock 数据。
+然后确认 `package.json` 的 `dsh.profile.bundles` 数组里包含 `"dsh-cap-profile"`，重启 `dsh` 即可。安装后在会话视图 tab 列出现「能力画像」tab（order 40）。
+
+### 本地开发
+
+clone 本仓库后在 profile 里用 link 依赖：
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm add link:../path/to/dsh-cap-profile
+```
+
+客户端改动只需浏览器 F5；Node 侧（`index.js` / `lib/*.js`）改动需重启 `dsh`。数据来自当前用户 `~/.dsh/sessions`；首次打开触发后台首扫（大历史约 20s 级），期间显示 mock 数据。
 
 ## 开发
 
 ```bash
 npm test                     # node --test test/*.test.mjs
-dsh web --patch ./cordis.patch.yml --port 3090   # 开发预览
 ```
+
+开发预览见上文「本地开发」（profile link 依赖 + 重启 `dsh`）。
 
 `test/harness/index.html` 是独立的浏览器渲染 harness（mock 数据，`?scenario=mock|live|empty|error&chrome=0`），用于不依赖 dsh 环境验证面板渲染。
 

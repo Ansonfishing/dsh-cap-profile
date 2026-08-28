@@ -1,5 +1,7 @@
 # dsh-cap-profile
 
+**Languages: [English](README.en.md) | [中文](README.md)**
+
 Model capability profiling panel — a plugin for DSH (DeepSeek Harness).
 
 ![Panel screenshot](screenshots/cap-profile-panel.png)
@@ -21,19 +23,30 @@ Retrospective analysis of local DSH session history (`~/.dsh/sessions`, zstd-com
 
 ## Install
 
+In your DSH web profile directory (the directory with the profile's `package.json`, default `~/.dsh/profiles/web`):
+
 ```bash
-pnpm add dsh-cap-profile
-# or develop locally
-dsh web --patch ./cordis.patch.yml --port 3090
+cd ~/.dsh/profiles/web
+pnpm add github:Ansonfishing/dsh-cap-profile
 ```
 
-After install a "Capability Profile" tab appears in the conversation view (order 40). Data is read from the current user's `~/.dsh/sessions`; the first open triggers a background initial scan (~20s for large histories), during which mock data is shown.
+Then make sure `dsh.profile.bundles` in `package.json` includes `"dsh-cap-profile"`, and restart `dsh`. A "Capability Profile" tab then appears in the conversation view (order 40).
+
+### Local development
+
+Clone this repo and use a `link:` dependency in your profile:
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm add link:../path/to/dsh-cap-profile
+```
+
+Client-only changes need a browser refresh; Node-side changes (`index.js` / `lib/*.js`) need a `dsh` restart. Data is read from the current user's `~/.dsh/sessions`; the first open triggers a background initial scan (~20s for large histories), during which mock data is shown.
 
 ## Development
 
 ```bash
 npm test                     # node --test test/*.test.mjs
-dsh web --patch ./cordis.patch.yml --port 3090   # dev preview
 ```
 
 `test/harness/index.html` is a standalone browser render harness (mock data; `?scenario=mock|live|empty|error&chrome=0`) for verifying the panel render without a dsh environment.
