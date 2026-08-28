@@ -481,3 +481,34 @@ test("SSR: live + window + 空模型 → 「本时间段暂无模型」(左右�
   assert.ok(text.includes("本时间段暂无模型"), "窗口空态提示缺失");
   assert.ok(!text.includes("暂无会话档案"), "窗口空态不应回落到全量空态文案");
 });
+
+/* ---------- 常用工具表 per-tool 错误率列(P1.6) ---------- */
+
+const TOOL_DOC = {
+  source: "live",
+  generatedAt: "2026-08-28T16:00:00.000Z",
+  note: "tool rate fixture",
+  models: [
+    {
+      id: "pt / tool-model", sessions: 10, toolCalls: 190, toolErrors: 11, errorRate: 0.0579,
+      topTools: [
+        { tool: "bash", calls: 100, errors: 10 },
+        { tool: "read", calls: 50, errors: 0 },
+        { tool: "edit", calls: 40, errors: 1 },
+      ],
+      topErrors: [],
+    },
+  ],
+};
+
+test("SSR: 常用工具表 per-tool 错误率列(0 错误灰 / <5% 琥珀 / ≥5% 红)", () => {
+  const out = renderPanel([TOOL_DOC, "", false, 1, Date.now(), null, "", "calls", "0"]);
+  const text = out.text.join(" ");
+  assert.ok(text.includes("10.0%"), "bash 10/100 → 10.0%");
+  assert.ok(text.includes("2.5%"), "edit 1/40 → 2.5%");
+  assert.ok(text.includes("0.0%"), "read 0/50 → 0.0%");
+  const cls = out.classes.filter((c) => typeof c === "string" && c.includes("cp-num--"));
+  assert.ok(cls.some((c) => c.includes("cp-num--fail")), "≥5% 应为红色 tone");
+  assert.ok(cls.some((c) => c.includes("cp-num--warn")), "<5% 应为琥珀 tone");
+  assert.ok(cls.some((c) => c.includes("cp-num--zero")), "0 错误应为灰");
+});
