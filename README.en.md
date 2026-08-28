@@ -2,46 +2,39 @@
 
 **Languages: [English](README.en.md) | [中文](README.md)**
 
-Model capability profiling panel — a plugin for DSH (DeepSeek Harness).
+Per-model capability profiling — a plugin for DSH (DeepSeek Harness).
 
 ![Panel screenshot](screenshots/cap-profile-panel.png)
 
-## Features
+## Why
 
-Retrospective analysis of local DSH session history (`~/.dsh/sessions`, zstd-compressed JSONL) to build per-model capability profiles:
+The more sessions you run, the harder it is to answer "which model is reliable at what, and where does it tend to fail". Reading raw session logs is slow, and manual tallying misses things.
 
-- **Model comparison table** — sessions, tool calls, error count, error rate per model (provider / model).
-- **Top-5 tools** — most frequently used tools and their per-tool error counts.
-- **Top-5 error signatures** — normalized high-frequency error patterns (e.g. `bash: [exit code: 137] OOM`) to quickly spot where a model tends to fail.
-- **Time-range filter** — All / Last 7 days / Last 30 days / Last 90 days / Today / Yesterday (anchored to the max date in the data, resilient to system clock drift).
+This plugin turns the session history in `~/.dsh/sessions` into per-model capability profiles, directly answering: per-model session count, tool-call volume, error count, error rate, most-used tools, and top error signatures.
 
-## Highlights
+## Quick start
 
-- **Read-only** — the panel only analyzes and displays; it never mutates session data. The route validates a client header plus Origin/Referer and returns 403 on cross-origin requests.
-- **Incremental caching** — per-file mtime baseline with background scanning (60s incremental / 24h full re-scan). While the initial scan is still running the route falls back to the last cache or mock data, so it never blocks.
-- **Zero runtime dependencies** — pure Node.js (Node ≥ 20; multi-frame zstd decoding via the built-in `zstdDecompressSync`).
-
-## Install
-
-In your DSH web profile directory (the directory with the profile's `package.json`, default `~/.dsh/profiles/web`):
+**Prerequisites**: DSH (with web) + pnpm; Node ≥ 24 (zstd decoding uses the built-in `zstdDecompressSync`).
 
 ```bash
-cd ~/.dsh/profiles/web
+cd ~/.dsh/profiles/web                      # your DSH web profile directory
 pnpm add github:Ansonfishing/dsh-cap-profile
 ```
 
-Then make sure `dsh.profile.bundles` in `package.json` includes `"dsh-cap-profile"`, and restart `dsh`. A "Capability Profile" tab then appears in the conversation view (order 40).
+Then add `"dsh-cap-profile"` to the `dsh.profile.bundles` array in `package.json` and restart `dsh`. A "Capability Profile" tab appears in the conversation view; the first open triggers a background initial scan (~20s for large histories), during which mock data is shown.
 
-### Local development
+## Features
 
-Clone this repo and use a `link:` dependency in your profile:
+- **Model comparison table** — per model (provider / model): sessions, tool calls, errors, error rate.
+- **Top-5 tools / Top-5 error signatures** — per-model most-used tools with per-tool error counts; normalized high-frequency error patterns (e.g. `bash: [exit code: 137] OOM`) reveal where a model tends to fail.
+- **Time-range filter** — All / Last 7 / Last 30 / Last 90 days / Today / Yesterday (anchored to the max date in the data, resilient to system clock drift).
+- **Read-only** — analysis and display only, never mutates session data; the route validates a client header plus Origin/Referer and returns 403 on cross-origin requests.
+- **Incremental caching** — per-file mtime baseline with background scanning (60s incremental / 24h full re-scan); while the initial scan is still running the route falls back to the last cache or mock data, so it never blocks.
+- **Zero runtime dependencies** — pure Node.js.
 
-```bash
-cd ~/.dsh/profiles/web
-pnpm add link:../path/to/dsh-cap-profile
-```
+## No DSH? Take a look anyway
 
-Client-only changes need a browser refresh; Node-side changes (`index.js` / `lib/*.js`) need a `dsh` restart. Data is read from the current user's `~/.dsh/sessions`; the first open triggers a background initial scan (~20s for large histories), during which mock data is shown.
+Clone this repo and open `test/harness/index.html` in a browser — a zero-dependency render harness (mock data; `?scenario=mock|live|empty|error` switches scenarios, `?chrome=0` hides the harness bar).
 
 ## Development
 
@@ -49,7 +42,7 @@ Client-only changes need a browser refresh; Node-side changes (`index.js` / `lib
 npm test                     # node --test test/*.test.mjs
 ```
 
-`test/harness/index.html` is a standalone browser render harness (mock data; `?scenario=mock|live|empty|error&chrome=0`) for verifying the panel render without a dsh environment.
+Local development: after cloning, use `pnpm add link:../path/to/dsh-cap-profile` in your profile. Client-only changes need a browser refresh; Node-side changes (`index.js` / `lib/*.js`) need a `dsh` restart.
 
 ## License
 
