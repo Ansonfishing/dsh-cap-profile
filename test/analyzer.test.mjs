@@ -483,6 +483,92 @@ test("getPayload today/yesterday 单日窗口(锚点=数据最大日)", async ()
   }
 });
 
+test("getPayload 全量:tools=每模型 Top-10 工具 + series=逐日桶升序(无 time → 空数组)", async () => {
+  const root = makeRoot();
+  try {
+    const T1 = 1787800000000;
+    const T2 = T1 + 86400000;
+    writeFile(root, "w/fA/session.jsonl.zstd", sessionFrames({
+      provider: "pa", model: "mA", headerTime: T1,
+      calls: [
+        { name: "bash", ok: false, errText: "Error: boom", time: T1 },
+        { name: "bash", time: T1 },
+        { name: "read", time: T1 },
+        { name: "edit", time: T2 },
+        { name: "grep", time: T2 },
+      ],
+    }));
+    writeFile(root, "w/fB/session.jsonl.zstd", sessionFrames({
+      provider: "pa", model: "mA", headerTime: T2,
+      calls: [
+        { name: "bash", time: T2 },
+        { name: "t1", time: T2 }, { name: "t2", time: T2 }, { name: "t3", time: T2 },
+        { name: "t4", time: T2 }, { name: "t5", time: T2 }, { name: "t6", time: T2 },
+        { name: "t7", time: T2 }, { name: "t8", time: T2 },
+      ],
+    }));
+    // 无任何 time → 不落天桶:series 空,tools 仍在(全量口径)
+    // (原始行构造:sessionFrames 的 rec 缺省时间戳会污染"无 time"场景)
+    writeFile(root, "w/fC/session.jsonl.zstd", zframe([
+      JSON.stringify({ type: "session", seq: 1, data: { id: "z", cwd: "/tmp" } }),
+      JSON.stringify({ type: "request/header", seq: 1, data: { header: { config: { provider: "pz", model: "mZ", maxTokens: 1 } } } }),
+      JSON.stringify({ type: "tool/call", seq: 1, data: { callId: "c1", name: "bash", arguments: "{}" } }),
+      JSON.stringify({ type: "tool/result", seq: 1, data: { message: { content: [{ type: "tool-result", toolCallId: "c1", isError: true, content: [{ type: "text", text: "x" }] }] } } }),
+      JSON.stringify({ type: "tool/call", seq: 1, data: { callId: "c2", name: "bash", arguments: "{}" } }),
+    ].join("\n") + "\n"));
+    const store = new ProfileStore({ sessionsRoot: root });
+    await store.scanFull();
+    const p = store.getPayload(0);
+    assert.equal(p.models.length, 2);
+    const mA = p.models.find((m) => m.id === "pa / mA");
+    // tools:12 个 distinct → Top-10 截断(同 calls 按名升序,t7/t8 被裁)
+    assert.ok(Array.isArray(mA.tools), "模型应带 tools 数组");
+    assert.equal(mA.tools.length, 10, "tools Top-10 截断");
+    assert.deepEqual(mA.tools[0], { tool: "bash", calls: 3, errors: 1 });
+    assert.deepEqual(mA.tools.slice(1).map((t) => t.tool),
+      ["edit", "grep", "read", "t1", "t2", "t3", "t4", "t5", "t6"]);
+    // series:T1 日 3 调 1 错,T2 日 11 调(文件 A 的 edit/grep + 文件 B 的 9 条)
+    assert.deepEqual(mA.series, [
+      { d: dayKeyOf(T1), calls: 3, errors: 1 },
+      { d: dayKeyOf(T2), calls: 11, errors: 0 },
+    ], "series 全量逐日升序");
+    const mZ = p.models.find((m) => m.id === "pz / mZ");
+    assert.deepEqual(mZ.tools, [{ tool: "bash", calls: 2, errors: 1 }], "无 time 模型 tools 仍在");
+    assert.deepEqual(mZ.series, [], "无 time 模型 series 为空数组");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("getPayload(7):tools/series 只聚合窗口内(窗口外日不计)", async () => {
+  const root = makeRoot();
+  try {
+    const T_NOW = 1787800000000;
+    writeFile(root, "w/fC/session.jsonl.zstd", sessionFrames({
+      provider: "pc", model: "mC", headerTime: T_NOW,
+      calls: [
+        { name: "bash", ok: false, errText: "Error: old", time: T_NOW - 9 * 86400000 }, // 7 天窗口外
+        { name: "read", time: T_NOW - 86400000 },
+        { name: "read", time: T_NOW },
+      ],
+    }));
+    const store = new ProfileStore({ sessionsRoot: root });
+    await store.scanFull();
+    const w = store.getPayload(7);
+    assert.ok(w, "窗口 payload 应存在");
+    assert.equal(w.models.length, 1, "mC 窗口内有活动");
+    const mC = w.models[0];
+    assert.equal(mC.toolCalls, 2, "窗口外调用不计");
+    assert.deepEqual(mC.tools, [{ tool: "read", calls: 2, errors: 0 }], "tools 只聚合窗口内");
+    assert.deepEqual(mC.series, [
+      { d: dayKeyOf(T_NOW - 86400000), calls: 1, errors: 0 },
+      { d: dayKeyOf(T_NOW), calls: 1, errors: 0 },
+    ], "series 只含窗口内日,升序");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("getPayload(days):数据无任何时间戳 → 无法锚定窗口,返回 null", async () => {
   const root = makeRoot();
   try {
@@ -694,6 +780,46 @@ await atest("POST → 405", async () => {
     const doc = JSON.parse(res.body);
     assert.ok(!doc.window, "非法 days 应回退全量");
     assert.equal(doc.models.length, 2);
+  });
+
+  await atest("路由 ?days=7 → live 模型带 tools/series 字段", async () => {
+    const { registered, app } = startApp();
+    await app;
+    const res = fakeRes();
+    await registered.handler(fakeReq("GET", {
+      host: "127.0.0.1:3080",
+      referer: "http://127.0.0.1:3080/",
+      "x-dsh-cap-profile-client": "v1",
+    }, "/capability-profile?days=7"), res);
+    assert.equal(res.status, 200);
+    const doc = JSON.parse(res.body);
+    const mA = doc.models.find((m) => m.id === "pa / mA");
+    assert.ok(mA, "wA 在窗口内");
+    assert.deepEqual(mA.tools, [
+      { tool: "bash", calls: 1, errors: 0 },
+      { tool: "read", calls: 1, errors: 0 },
+    ], "wA tools(窗口内,Top-10)");
+    assert.deepEqual(mA.series, [{ d: dayKeyOf(W_NOW), calls: 2, errors: 0 }], "wA series=窗口内单日");
+  });
+
+  await atest("路由 全量(无 days) → live 模型带 tools/series 字段", async () => {
+    const { registered, app } = startApp();
+    await app;
+    const res = fakeRes();
+    await registered.handler(fakeReq("GET", {
+      host: "127.0.0.1:3080",
+      referer: "http://127.0.0.1:3080/",
+      "x-dsh-cap-profile-client": "v1",
+    }, "/capability-profile"), res);
+    assert.equal(res.status, 200);
+    const doc = JSON.parse(res.body);
+    assert.equal(doc.models.length, 2);
+    const mA = doc.models.find((m) => m.id === "pa / mA");
+    assert.deepEqual(mA.tools, [
+      { tool: "bash", calls: 1, errors: 0 },
+      { tool: "read", calls: 1, errors: 0 },
+    ]);
+    assert.deepEqual(mA.series, [{ d: dayKeyOf(W_NOW), calls: 2, errors: 0 }]);
   });
 }
 

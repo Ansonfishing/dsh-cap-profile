@@ -6,13 +6,15 @@
  *   node test/contract.test.mjs                 # 默认测 lib/client.js
  *   node test/contract.test.mjs <file>          # 指定目标文件
  *
- * 覆盖(白底两 Pane v2):
+ * 覆盖(白底两 Pane v2 + P2.0 多模型对比):
  *  - 设计语言(与 dsh-model-manager 同款白底 GitHub-light): --bg #ffffff 等 token、
  *    320px 1fr 两 Pane、pill 999px、tabular-nums、.12s 过渡、focus-visible、
  *    reduced-motion、窄列单列降级
  *  - 数据通道不变量: /capability-profile + v1 头、60s 轮询、404 文案、models 校验、tab 注册
  *  - 状态 SSR(零依赖 fake React): 加载 / 数据(两 Pane + [object Object] 回归) /
  *    错误条 / 搜索过滤 / P1 形状数据直渲(3 模型、零错误、空 topErrors)
+ *  - P2.0 对比: 行勾选框(≤4) / 「对比 (N)」按钮 / 对比视图四块(核心指标 / 工具矩阵 /
+ *    错误签名 / 每日趋势)/ 矩阵展开收起 / 缺数据回退(单模型详情、topTools、趋势隐藏)
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -89,6 +91,14 @@ const invariants = [
   "示例数据不支持时间筛选",
   "今天",
   "昨天",
+  /* P2.0 多模型对比 */
+  "加入对比",
+  "模型对比",
+  "核心指标",
+  "工具使用矩阵",
+  "每日趋势",
+  "cp-cmpBox",
+  "cachedCompareIds",
 ];
 
 for (const needle of invariants) {
@@ -511,4 +521,171 @@ test("SSR: 常用工具表 per-tool 错误率列(0 错误灰 / <5% 琥珀 / ≥5
   assert.ok(cls.some((c) => c.includes("cp-num--fail")), "≥5% 应为红色 tone");
   assert.ok(cls.some((c) => c.includes("cp-num--warn")), "<5% 应为琥珀 tone");
   assert.ok(cls.some((c) => c.includes("cp-num--zero")), "0 错误应为灰");
+});
+
+/* ---------- 多模型对比(P2.0) ----------
+   useState 注入契约追加: 9 compareIds(string[]), 10 viewMode("detail"|"compare"), 11 matrixExpanded(bool)
+   新状态一律放主组件(CapProfilePanel),ComparePane 只收 props —— 不破坏 fake React 按索引注入的契约。 */
+
+const CMP_DOC = {
+  source: "live",
+  generatedAt: "2026-08-28T17:00:00.000Z",
+  note: "compare fixture",
+  models: [
+    {
+      id: "pa / alpha", sessions: 100, toolCalls: 900, toolErrors: 81, errorRate: 0.09,
+      topTools: [{ tool: "bash", calls: 500, errors: 60 }],
+      topErrors: [{ signature: "bash: [exit code: 1]", count: 60 }],
+      tools: [
+        { tool: "bash", calls: 500, errors: 60 },
+        { tool: "read", calls: 300, errors: 5 },
+        { tool: "edit", calls: 100, errors: 16 },
+      ],
+      series: [
+        { d: "2026-08-26", calls: 100, errors: 9 },
+        { d: "2026-08-27", calls: 400, errors: 36 },
+        { d: "2026-08-28", calls: 400, errors: 36 },
+      ],
+    },
+    {
+      id: "pb / beta", sessions: 60, toolCalls: 500, toolErrors: 5, errorRate: 0.01,
+      topTools: [{ tool: "read", calls: 200, errors: 1 }],
+      topErrors: [{ signature: "read: no such file", count: 1 }],
+      tools: [
+        { tool: "read", calls: 200, errors: 1 },
+        { tool: "grep", calls: 150, errors: 2 },
+        { tool: "bash", calls: 150, errors: 2 },
+      ],
+      series: [
+        { d: "2026-08-27", calls: 200, errors: 2 },
+        { d: "2026-08-28", calls: 300, errors: 3 },
+      ],
+    },
+  ],
+};
+
+// 5 模型 × 各 10 个互不相同工具 → 矩阵并集 40 行(>15,触发展开/收起)
+const CMP_DOC5 = {
+  source: "live",
+  generatedAt: "2026-08-28T17:00:00.000Z",
+  note: "compare cap fixture",
+  models: [0, 1, 2, 3, 4].map((i) => ({
+    id: "p5 / m" + (i + 1),
+    sessions: 10 + i, toolCalls: 500 + i * 10, toolErrors: i, errorRate: 0.01 * (i + 1) / 10,
+    topTools: [], topErrors: [],
+    tools: Array.from({ length: 10 }, (_, j) => ({ tool: "tool_" + j + "_" + i, calls: 100 - j, errors: 0 })),
+    series: [],
+  })),
+};
+
+const cmpState = (doc, compareIds, viewMode, expanded) =>
+  [doc, "", false, 1, Date.now(), null, "", "calls", "0", compareIds, viewMode, expanded];
+
+function findInputs(node, out = []) {
+  if (node == null || typeof node !== "object") return out;
+  if (Array.isArray(node)) { node.forEach((n) => findInputs(n, out)); return out; }
+  const { type, props = {} } = node;
+  if (typeof type === "function") { findInputs(type(props), out); return out; }
+  if (type === "input") out.push(props);
+  findInputs(props.children, out);
+  return out;
+}
+
+function cmpToolRows(node, out = []) {
+  if (node == null || typeof node !== "object") return out;
+  if (Array.isArray(node)) { node.forEach((n) => cmpToolRows(n, out)); return out; }
+  const { type, props = {} } = node;
+  if (typeof type === "function") { cmpToolRows(type(props), out); return out; }
+  const cls = typeof props.className === "string" ? props.className : "";
+  if (type === "span" && cls.includes("cp-mTool")) out.push(String((props.children || []).map((c) => (typeof c === "string" ? c : "")).join("")));
+  cmpToolRows(props.children, out);
+  return out;
+}
+
+test("SSR: 模型行对比勾选框(aria-label / checked 反映选中 / 已选 4 个时未选项禁用)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha"], "detail", false));
+  const boxes = findInputs(out.tree).filter((p) => p.type === "checkbox");
+  assert.equal(boxes.length, 2, "每行一个对比勾选框");
+  const byLabel = {};
+  for (const b of boxes) byLabel[b["aria-label"]] = b;
+  assert.ok(byLabel["加入对比 pa / alpha"], "aria-label 应含模型 id");
+  assert.equal(byLabel["加入对比 pa / alpha"].checked, true, "已选模型 checkbox 应 checked");
+  assert.equal(byLabel["加入对比 pb / beta"].checked, false, "未选模型 checkbox 应未 checked");
+
+  const out4 = renderPanel(cmpState(CMP_DOC5, ["p5 / m1", "p5 / m2", "p5 / m3", "p5 / m4"], "detail", false));
+  const boxes4 = findInputs(out4.tree).filter((p) => p.type === "checkbox");
+  assert.equal(boxes4.length, 5, "5 模型 5 个勾选框");
+  const m5 = boxes4.find((b) => String(b["aria-label"] || "").includes("p5 / m5"));
+  assert.equal(m5 && m5.disabled, true, "已选满 4 个后未选行的勾选框应禁用");
+  const m1 = boxes4.find((b) => String(b["aria-label"] || "").includes("p5 / m1"));
+  assert.equal(m1 && m1.disabled, false, "已选行的勾选框(用于取消)不禁用");
+});
+
+test("SSR: 「对比」按钮(有效选中 ≥2 才出现,1 或 0 个不出现)", () => {
+  const t0 = renderPanel(cmpState(CMP_DOC, [], "detail", false)).text.join(" ");
+  assert.ok(!t0.includes("对比 ("), "0 选中不应出现对比按钮");
+  const t1 = renderPanel(cmpState(CMP_DOC, ["pa / alpha"], "detail", false)).text.join(" ");
+  assert.ok(!t1.includes("对比 ("), "1 选中不应出现对比按钮");
+  const t2 = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "detail", false)).text.join(" ");
+  assert.ok(t2.includes("对比 (2)"), "2 选中应出现「对比 (2)」按钮");
+});
+
+test("SSR: 对比视图 — 核心指标(错误率最低绿最高红 / 调用数最高加粗)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
+  const text = out.text.join(" ");
+  for (const needle of ["模型对比", "核心指标", "工具使用矩阵", "高频错误签名", "每日趋势", "← 单模型画像"]) {
+    assert.ok(text.includes(needle), "对比视图缺少: " + needle);
+  }
+  assert.ok(text.includes("9.0%"), "alpha 错误率 0.09 → 9.0%");
+  assert.ok(text.includes("1.0%"), "beta 错误率 0.01 → 1.0%");
+  assert.ok(text.includes("900") && text.includes("500"), "工具调用 900 / 500");
+  const anyClass = (frag) => out.classes.some((c) => typeof c === "string" && c.includes(frag));
+  assert.ok(anyClass("cp-num--best"), "最低错误率/错误数应有绿色 best 类");
+  assert.ok(anyClass("cp-num--worst"), "最高错误率/错误数应有红色 worst 类");
+  assert.ok(anyClass("cp-num--top"), "最高调用量应有加粗 top 类");
+  // 对比视图替换单模型详情
+  assert.ok(!text.includes("常用工具 Top"), "对比视图不应渲染单模型详情");
+});
+
+test("SSR: 对比视图 — 工具矩阵(并集行 / 按最大调用降序 / 缺失列 — / 展开收起)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
+  assert.deepEqual(cmpToolRows(out.tree), ["bash", "read", "grep", "edit"], "矩阵行序 = 行内最大调用降序");
+  const text = out.text.join(" ");
+  assert.ok(text.includes("—"), "该模型无此工具应显示 —");
+  assert.ok(text.includes("12.0%"), "bash@alpha 60/500 → 12.0%");
+  assert.ok(text.includes("×60"), "错误签名矩阵 alpha bash 签名 ×60");
+  assert.ok(!text.includes("展开全部"), "并集 ≤15 行不需要展开按钮");
+
+  // 40 行并集:折叠 15 行 + 「展开全部 40 个工具」;展开 40 行 + 「收起」
+  const ids4 = ["p5 / m1", "p5 / m2", "p5 / m3", "p5 / m4"];
+  const collapsed = renderPanel(cmpState(CMP_DOC5, ids4, "compare", false));
+  assert.equal(cmpToolRows(collapsed.tree).length, 15, "默认只展开 15 行");
+  assert.ok(collapsed.text.join(" ").includes("展开全部 40 个工具"), "展开按钮带总数");
+  const expanded = renderPanel(cmpState(CMP_DOC5, ids4, "compare", true));
+  assert.equal(cmpToolRows(expanded.tree).length, 40, "展开后全部 40 行");
+  assert.ok(expanded.text.join(" ").includes("收起"), "展开后按钮变「收起」");
+});
+
+test("SSR: 对比视图 — 每日趋势(日期行 / 条形 / 当日错误 ×N / 无 series 时整块不渲染)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
+  const text = out.text.join(" ");
+  for (const d of ["08-26", "08-27", "08-28"]) assert.ok(text.includes(d), "趋势应含日期 " + d);
+  assert.ok(text.includes("×9"), "当日错误 α 08-26 → ×9");
+  assert.ok(out.classes.some((c) => typeof c === "string" && c.includes("cp-tBar")), "趋势条形类 cp-tBar 缺失");
+
+  // 无 series 字段(mock 旧形状)→ 趋势块整体不渲染,矩阵回落 topTools
+  const out2 = renderPanel(cmpState(MOCK_DOC,
+    ["local-a / Demo-VL-35B-A3B", "local-b / Demo-27B-FP8"], "compare", false));
+  const text2 = out2.text.join(" ");
+  assert.ok(text2.includes("模型对比"), "mock 形状仍应进入对比视图");
+  assert.ok(!text2.includes("每日趋势"), "无 series 数据不应渲染趋势块");
+  assert.ok(text2.includes("工具使用矩阵"), "矩阵应回落 topTools");
+});
+
+test("SSR: 对比回退(有效选中 <2 → 渲染单模型详情,不崩)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "gone / x"], "compare", false));
+  const text = out.text.join(" ");
+  assert.ok(!text.includes("模型对比 ·"), "只有 1 个有效模型不应渲染对比视图");
+  assert.ok(text.includes("常用工具 Top"), "应回落到单模型详情视图");
+  assert.ok(!text.includes("对比 ("), "有效选中 1 个 → 对比按钮隐藏");
 });
