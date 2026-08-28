@@ -1,6 +1,6 @@
 {
   "name": "dsh-cap-profile",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "type": "module",
   "main": "./index.js",
   "description": "模型能力画像: 回顾式分析 ~/.dsh 历史会话 → 按模型的能力画像(擅长面/易翻车/建议用法) + 会话区只读观察窗 tab",
