@@ -99,6 +99,9 @@ const invariants = [
   "每日趋势",
   "cp-cmpBox",
   "cachedCompareIds",
+  "cp-cmpColProv",
+  "cp-cmpTbl",
+  "position:sticky",
 ];
 
 for (const needle of invariants) {
@@ -680,6 +683,47 @@ test("SSR: 对比视图 — 每日趋势(日期行 / 条形 / 当日错误 ×N /
   assert.ok(text2.includes("模型对比"), "mock 形状仍应进入对比视图");
   assert.ok(!text2.includes("每日趋势"), "无 series 数据不应渲染趋势块");
   assert.ok(text2.includes("工具使用矩阵"), "矩阵应回落 topTools");
+});
+
+function findCmpCols(node, out = []) {
+  if (node == null || typeof node !== "object") return out;
+  if (Array.isArray(node)) { node.forEach((n) => findCmpCols(n, out)); return out; }
+  const { type, props = {} } = node;
+  if (typeof type === "function") { findCmpCols(type(props), out); return out; }
+  const cls = typeof props.className === "string" ? props.className : "";
+  if (type === "span" && cls.split(/\s+/).includes("cp-cmpCol")) out.push(props);
+  findCmpCols(props.children, out);
+  return out;
+}
+
+test("SSR: 对比视图 — 列模型识别(provider+名两行列头 / 列色码 / 趋势条同色 / 点列头跳单模型)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
+  const text = out.text.join(" ");
+  assert.ok(text.includes("pa"), "列头应含 provider pa");
+  assert.ok(text.includes("pb"), "列头应含 provider pb");
+  const cols = findCmpCols(out.tree);
+  assert.equal(cols.length, 8, "4 张表 × 2 模型列 = 8 列头");
+  assert.equal(typeof cols[0].onClick, "function", "列头应可点击(跳单模型)");
+  assert.ok(cols[0].style && cols[0].style.borderTopColor, "列头应有列色边框");
+  assert.equal(cols[0].style.borderTopColor, cols[2].style.borderTopColor, "同一模型跨表列色一致");
+  assert.notEqual(cols[0].style.borderTopColor, cols[1].style.borderTopColor, "相邻模型列色不同");
+  // 列头两行:第一行 provider,第二行模型短名
+  const lineTexts = (p) => (p.children || []).filter((c) => typeof c === "object").map((c) => (c.props.children || []).join(""));
+  assert.deepEqual(lineTexts(cols[0]), ["pa", "alpha"], "列头行序 = provider 行 + 模型名行");
+  assert.deepEqual(lineTexts(cols[1]), ["pb", "beta"], "第二列 = pb / beta");
+  // 趋势条颜色 = 该列的列色
+  const fills = [];
+  (function walk(n) {
+    if (n == null || typeof n !== "object") return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    const { type, props = {} } = n;
+    if (typeof type === "function") { walk(type(props)); return; }
+    if (type === "div" && typeof props.className === "string" && props.className.includes("cp-tBarFill")) fills.push(props.style);
+    walk(props.children);
+  })(out.tree);
+  assert.ok(fills.length >= 3, "趋势条形应渲染");
+  assert.equal(fills[0].background, cols[0].style.borderTopColor, "条形颜色 = 模型列色");
+  assert.ok(fills.some((f) => f.background === cols[1].style.borderTopColor), "第二模型条形 = 其列色");
 });
 
 test("SSR: 对比回退(有效选中 <2 → 渲染单模型详情,不崩)", () => {
