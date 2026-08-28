@@ -1,0 +1,7 @@
+# dsh-cap-profile dev overlay — 源码 checkout 开发通道。
+# 用法(在本目录): dsh web --patch ./cordis.yml --port 3090
+# 前提: ~/.dsh/profiles/web/node_modules/@dsh-cap-profile-dev/plugin 软链指向本目录
+# (见 scripts/materialize-alias.sh)。正式装 profile 走 cordis.patch.yml 通道。
+- insert:
+    - id: dsh-cap-profile
+      name: "@dsh-cap-profile-dev/plugin"

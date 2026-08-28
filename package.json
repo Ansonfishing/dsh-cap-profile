@@ -1,0 +1,33 @@
+{
+  "name": "dsh-cap-profile",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./index.js",
+  "description": "模型能力画像: 回顾式分析 ~/.dsh 历史会话 → 按模型的能力画像(擅长面/易翻车/建议用法) + 会话区只读观察窗 tab",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "license": "MIT"
+}

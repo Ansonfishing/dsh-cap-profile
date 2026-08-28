@@ -1,0 +1,5 @@
+# 官方 DSH profile bundle 层(正式装入 profile 时使用; dev 通道用 cordis.yml + --patch)。
+# 走此通道时 lib/client.js 的 banner id 必须同步改为 "dsh-cap-profile"。
+- insert:
+    - id: dsh-cap-profile
+      name: "dsh-cap-profile"

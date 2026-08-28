@@ -1,0 +1,8 @@
+.mnemon/
+.tmp-*
+dev-web.log
+node_modules/
+
+# 个人过程文档(含本机/路径信息,不入库;公开仓以 README 为准)
+DESIGN.md
+PROGRESS.md
