@@ -91,17 +91,18 @@ const invariants = [
   "示例数据不支持时间筛选",
   "今天",
   "昨天",
-  /* P2.0 多模型对比 */
+  /* P2.0 多模型对比 / P2.1 卡片式 */
   "加入对比",
   "模型对比",
   "核心指标",
-  "工具使用矩阵",
+  "常用工具",
   "每日趋势",
   "cp-cmpBox",
   "cachedCompareIds",
-  "cp-cmpColProv",
-  "cp-cmpTbl",
-  "position:sticky",
+  "cp-cards",
+  "cp-cardHead",
+  "cp-cardProv",
+  "cp-sparkBar",
 ];
 
 for (const needle of invariants) {
@@ -594,16 +595,51 @@ function findInputs(node, out = []) {
   return out;
 }
 
-function cmpToolRows(node, out = []) {
+/* P2.1 卡片式 helper:按 className token 精确匹配(避免 cp-card 误中 cp-cardHead)。
+   兼容两种输入:element({type,props}) 和 props 对象(byToken 返回的是 props)。 */
+function byToken(node, token, out = []) {
   if (node == null || typeof node !== "object") return out;
-  if (Array.isArray(node)) { node.forEach((n) => cmpToolRows(n, out)); return out; }
-  const { type, props = {} } = node;
-  if (typeof type === "function") { cmpToolRows(type(props), out); return out; }
-  const cls = typeof props.className === "string" ? props.className : "";
-  if (type === "span" && cls.includes("cp-mTool")) out.push(String((props.children || []).map((c) => (typeof c === "string" ? c : "")).join("")));
-  cmpToolRows(props.children, out);
+  if (Array.isArray(node)) { node.forEach((n) => byToken(n, token, out)); return out; }
+  if (node.type !== undefined) {  // element(含 function component)
+    if (typeof node.type === "function") { byToken(node.type(node.props || {}), token, out); return out; }
+    byToken(node.props, token, out);
+    return out;
+  }
+  const cls = typeof node.className === "string" ? node.className : "";
+  if (cls.split(/\s+/).includes(token)) out.push(node);
+  byToken(node.children, token, out);
   return out;
 }
+
+function textOf(node, out = "") {
+  if (node == null) return out;
+  if (typeof node === "string") return out + node;
+  if (Array.isArray(node)) { for (const x of node) out = textOf(x, out); return out; }
+  if (typeof node === "object") {
+    if (node.type !== undefined) {
+      if (typeof node.type === "function") return textOf(node.type(node.props || {}), out);
+      return textOf(node.props, out);
+    }
+    return textOf(node.children, out);  // props 对象
+  }
+  return out;
+}
+
+function classTokens(node, out = []) {
+  if (node == null || typeof node !== "object") return out;
+  if (Array.isArray(node)) { node.forEach((n) => classTokens(n, out)); return out; }
+  if (node.type !== undefined) {
+    if (typeof node.type === "function") { classTokens(node.type(node.props || {}), out); return out; }
+    classTokens(node.props, out);
+    return out;
+  }
+  if (typeof node.className === "string") out.push(node.className);
+  classTokens(node.children, out);
+  return out;
+}
+
+const findCards = (node) => byToken(node, "cp-card");
+const toolNamesIn = (node) => byToken(node, "cp-cToolN").map((p) => textOf(p));
 
 test("SSR: 模型行对比勾选框(aria-label / checked 反映选中 / 已选 4 个时未选项禁用)", () => {
   const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha"], "detail", false));
@@ -633,97 +669,90 @@ test("SSR: 「对比」按钮(有效选中 ≥2 才出现,1 或 0 个不出现)"
   assert.ok(t2.includes("对比 (2)"), "2 选中应出现「对比 (2)」按钮");
 });
 
-test("SSR: 对比视图 — 核心指标(错误率最低绿最高红 / 调用数最高加粗)", () => {
+test("SSR: 对比视图 — 模型卡(每模型一卡 / 卡头 provider+名 / 卡色不同 / 点卡头跳单模型)", () => {
   const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
   const text = out.text.join(" ");
-  for (const needle of ["模型对比", "核心指标", "工具使用矩阵", "高频错误签名", "每日趋势", "← 单模型画像"]) {
-    assert.ok(text.includes(needle), "对比视图缺少: " + needle);
-  }
-  assert.ok(text.includes("9.0%"), "alpha 错误率 0.09 → 9.0%");
-  assert.ok(text.includes("1.0%"), "beta 错误率 0.01 → 1.0%");
-  assert.ok(text.includes("900") && text.includes("500"), "工具调用 900 / 500");
-  const anyClass = (frag) => out.classes.some((c) => typeof c === "string" && c.includes(frag));
-  assert.ok(anyClass("cp-num--best"), "最低错误率/错误数应有绿色 best 类");
-  assert.ok(anyClass("cp-num--worst"), "最高错误率/错误数应有红色 worst 类");
-  assert.ok(anyClass("cp-num--top"), "最高调用量应有加粗 top 类");
+  assert.ok(text.includes("模型对比 · 2 个模型"), "对比视图标题");
+  assert.ok(text.includes("← 单模型画像"), "返回按钮");
+  const cards = findCards(out.tree);
+  assert.equal(cards.length, 2, "每模型一张卡");
+  const a = cards.find((c) => textOf(c).includes("alpha"));
+  const b = cards.find((c) => textOf(c).includes("beta"));
+  assert.ok(a && b, "能按名字定位 alpha/beta 卡");
+  assert.ok(textOf(a).includes("pa") && textOf(b).includes("pb"), "卡头应含 provider");
+  assert.ok(a.style && a.style.borderTopColor, "卡应有列色顶边");
+  assert.notEqual(a.style.borderTopColor, b.style.borderTopColor, "不同卡颜色不同");
+  const heads = byToken(out.tree, "cp-cardHead");
+  assert.equal(heads.length, 2, "每卡一个卡头");
+  assert.equal(typeof heads[0].onClick, "function", "点卡头应跳单模型");
   // 对比视图替换单模型详情
   assert.ok(!text.includes("常用工具 Top"), "对比视图不应渲染单模型详情");
 });
 
-test("SSR: 对比视图 — 工具矩阵(并集行 / 按最大调用降序 / 缺失列 — / 展开收起)", () => {
+test("SSR: 对比视图 — 卡内核心指标 chips(跨模型 tone 落在正确卡 / 数值在卡内)", () => {
   const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
-  assert.deepEqual(cmpToolRows(out.tree), ["bash", "read", "grep", "edit"], "矩阵行序 = 行内最大调用降序");
-  const text = out.text.join(" ");
-  assert.ok(text.includes("—"), "该模型无此工具应显示 —");
-  assert.ok(text.includes("12.0%"), "bash@alpha 60/500 → 12.0%");
-  assert.ok(text.includes("×60"), "错误签名矩阵 alpha bash 签名 ×60");
-  assert.ok(!text.includes("展开全部"), "并集 ≤15 行不需要展开按钮");
-
-  // 40 行并集:折叠 15 行 + 「展开全部 40 个工具」;展开 40 行 + 「收起」
-  const ids4 = ["p5 / m1", "p5 / m2", "p5 / m3", "p5 / m4"];
-  const collapsed = renderPanel(cmpState(CMP_DOC5, ids4, "compare", false));
-  assert.equal(cmpToolRows(collapsed.tree).length, 15, "默认只展开 15 行");
-  assert.ok(collapsed.text.join(" ").includes("展开全部 40 个工具"), "展开按钮带总数");
-  const expanded = renderPanel(cmpState(CMP_DOC5, ids4, "compare", true));
-  assert.equal(cmpToolRows(expanded.tree).length, 40, "展开后全部 40 行");
-  assert.ok(expanded.text.join(" ").includes("收起"), "展开后按钮变「收起」");
+  const cards = findCards(out.tree);
+  const a = cards.find((c) => textOf(c).includes("alpha"));
+  const b = cards.find((c) => textOf(c).includes("beta"));
+  assert.ok(textOf(a).includes("核心指标") && textOf(b).includes("核心指标"), "每卡都有核心指标块");
+  // alpha: 错误率 9% 最高 → worst 红;调用 900 最高 → top 加粗
+  assert.ok(classTokens(a).some((c) => c.includes("cp-num--worst")), "alpha 错误率最高 → 红");
+  assert.ok(classTokens(a).some((c) => c.includes("cp-num--top")), "alpha 调用最高 → 加粗");
+  // beta: 错误率 1% 最低 → best 绿
+  assert.ok(classTokens(b).some((c) => c.includes("cp-num--best")), "beta 错误率最低 → 绿");
+  assert.ok(!classTokens(b).some((c) => c.includes("cp-num--worst")), "beta 无 worst");
+  // 数值在各自卡内
+  assert.ok(textOf(a).includes("9.0%") && textOf(a).includes("900"), "alpha 卡内 9.0% / 900");
+  assert.ok(textOf(b).includes("1.0%") && textOf(b).includes("500"), "beta 卡内 1.0% / 500");
 });
 
-test("SSR: 对比视图 — 每日趋势(日期行 / 条形 / 当日错误 ×N / 无 series 时整块不渲染)", () => {
+test("SSR: 对比视图 — 卡内常用工具(各自 Top / 占比条=卡色 / 错误率 tone / Top-8 截断 / 回落 topTools)", () => {
   const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
-  const text = out.text.join(" ");
-  for (const d of ["08-26", "08-27", "08-28"]) assert.ok(text.includes(d), "趋势应含日期 " + d);
-  assert.ok(text.includes("×9"), "当日错误 α 08-26 → ×9");
-  assert.ok(out.classes.some((c) => typeof c === "string" && c.includes("cp-tBar")), "趋势条形类 cp-tBar 缺失");
+  const cards = findCards(out.tree);
+  const a = cards.find((c) => textOf(c).includes("alpha"));
+  const b = cards.find((c) => textOf(c).includes("beta"));
+  assert.deepEqual(toolNamesIn(a), ["bash", "read", "edit"], "alpha 卡 = 自己的工具按调用降序");
+  assert.deepEqual(toolNamesIn(b), ["read", "grep", "bash"], "beta 卡 = 自己的工具,顺序=payload 序(analyzer 已排)");
+  const fillsA = byToken(a, "cp-cToolFill");
+  assert.equal(fillsA[0].style.width, "100%", "最大工具占比条 = 100%");
+  assert.equal(fillsA[0].style.background, a.style.borderTopColor, "占比条颜色 = 卡色");
+  const valsA = byToken(a, "cp-cToolV").map((p) => textOf(p));
+  assert.ok(valsA[0].includes("12.0%"), "bash@alpha 60/500 → 12.0%");
+  assert.ok(classTokens(a).some((c) => c.includes("cp-num--fail")), "错误率 ≥5% → 红 fail");
 
-  // 无 series 字段(mock 旧形状)→ 趋势块整体不渲染,矩阵回落 topTools
+  // CMP_DOC5:选 4 个 → 4 卡,每卡 Top-8(10 个工具截断),首行 = 自己的最大工具
+  const ids4 = ["p5 / m1", "p5 / m2", "p5 / m3", "p5 / m4"];
+  const out5 = renderPanel(cmpState(CMP_DOC5, ids4, "compare", false));
+  const cards5 = findCards(out5.tree);
+  assert.equal(cards5.length, 4, "选中 4 个 → 4 张卡");
+  for (const c of cards5) assert.equal(toolNamesIn(c).length, 8, "每卡只显示 Top-8");
+  assert.equal(toolNamesIn(cards5[0])[0], "tool_0_0", "首行 = 该模型最大工具");
+});
+
+test("SSR: 对比视图 — 卡内高频错误 + 每日趋势(Top-5 / mini 竖条 = 卡色 / 首末日期 / 无 series 不渲染)", () => {
+  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
+  const cards = findCards(out.tree);
+  const a = cards.find((c) => textOf(c).includes("alpha"));
+  const b = cards.find((c) => textOf(c).includes("beta"));
+  assert.ok(textOf(a).includes("×60"), "alpha 高频错误 ×60 在卡内");
+  assert.ok(textOf(b).includes("×1"), "beta 高频错误 ×1 在卡内");
+  const sparkA = byToken(a, "cp-sparkBar");
+  assert.equal(sparkA.length, 3, "alpha 3 天 → 3 根竖条");
+  assert.equal(byToken(b, "cp-sparkBar").length, 2, "beta 2 天 → 2 根竖条");
+  assert.equal(sparkA[0].style.background, a.style.borderTopColor, "趋势条颜色 = 卡色");
+  assert.ok(textOf(a).includes("08-26") && textOf(a).includes("08-28"), "趋势首末日期标签");
+  assert.ok(textOf(a).includes("每日趋势"), "趋势块标签");
+
+  // 无 series(mock 旧形状)→ 趋势块不渲染,工具列表回落 topTools
   const out2 = renderPanel(cmpState(MOCK_DOC,
     ["local-a / Demo-VL-35B-A3B", "local-b / Demo-27B-FP8"], "compare", false));
   const text2 = out2.text.join(" ");
   assert.ok(text2.includes("模型对比"), "mock 形状仍应进入对比视图");
-  assert.ok(!text2.includes("每日趋势"), "无 series 数据不应渲染趋势块");
-  assert.ok(text2.includes("工具使用矩阵"), "矩阵应回落 topTools");
-});
-
-function findCmpCols(node, out = []) {
-  if (node == null || typeof node !== "object") return out;
-  if (Array.isArray(node)) { node.forEach((n) => findCmpCols(n, out)); return out; }
-  const { type, props = {} } = node;
-  if (typeof type === "function") { findCmpCols(type(props), out); return out; }
-  const cls = typeof props.className === "string" ? props.className : "";
-  if (type === "span" && cls.split(/\s+/).includes("cp-cmpCol")) out.push(props);
-  findCmpCols(props.children, out);
-  return out;
-}
-
-test("SSR: 对比视图 — 列模型识别(provider+名两行列头 / 列色码 / 趋势条同色 / 点列头跳单模型)", () => {
-  const out = renderPanel(cmpState(CMP_DOC, ["pa / alpha", "pb / beta"], "compare", false));
-  const text = out.text.join(" ");
-  assert.ok(text.includes("pa"), "列头应含 provider pa");
-  assert.ok(text.includes("pb"), "列头应含 provider pb");
-  const cols = findCmpCols(out.tree);
-  assert.equal(cols.length, 8, "4 张表 × 2 模型列 = 8 列头");
-  assert.equal(typeof cols[0].onClick, "function", "列头应可点击(跳单模型)");
-  assert.ok(cols[0].style && cols[0].style.borderTopColor, "列头应有列色边框");
-  assert.equal(cols[0].style.borderTopColor, cols[2].style.borderTopColor, "同一模型跨表列色一致");
-  assert.notEqual(cols[0].style.borderTopColor, cols[1].style.borderTopColor, "相邻模型列色不同");
-  // 列头两行:第一行 provider,第二行模型短名
-  const lineTexts = (p) => (p.children || []).filter((c) => typeof c === "object").map((c) => (c.props.children || []).join(""));
-  assert.deepEqual(lineTexts(cols[0]), ["pa", "alpha"], "列头行序 = provider 行 + 模型名行");
-  assert.deepEqual(lineTexts(cols[1]), ["pb", "beta"], "第二列 = pb / beta");
-  // 趋势条颜色 = 该列的列色
-  const fills = [];
-  (function walk(n) {
-    if (n == null || typeof n !== "object") return;
-    if (Array.isArray(n)) { n.forEach(walk); return; }
-    const { type, props = {} } = n;
-    if (typeof type === "function") { walk(type(props)); return; }
-    if (type === "div" && typeof props.className === "string" && props.className.includes("cp-tBarFill")) fills.push(props.style);
-    walk(props.children);
-  })(out.tree);
-  assert.ok(fills.length >= 3, "趋势条形应渲染");
-  assert.equal(fills[0].background, cols[0].style.borderTopColor, "条形颜色 = 模型列色");
-  assert.ok(fills.some((f) => f.background === cols[1].style.borderTopColor), "第二模型条形 = 其列色");
+  assert.equal(byToken(out2.tree, "cp-sparkBar").length, 0, "无 series 不应渲染趋势条");
+  assert.ok(text2.includes("常用工具"), "工具列表应回落 topTools");
+  const cards2 = findCards(out2.tree);
+  assert.equal(cards2.length, 2, "mock 2 模型 → 2 张卡");
+  assert.deepEqual(toolNamesIn(cards2[0]), ["bash", "read"], "local-a topTools 顺序");
 });
 
 test("SSR: 对比回退(有效选中 <2 → 渲染单模型详情,不崩)", () => {
