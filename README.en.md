@@ -26,7 +26,8 @@ Then add `"dsh-cap-profile"` to the `dsh.profile.bundles` array in `package.json
 ## Features
 
 - **Model comparison table** — per model (provider / model): sessions, tool calls, errors, error rate.
-- **Top-5 tools / Top-5 error signatures** — per-model most-used tools with per-tool error counts; normalized high-frequency error patterns (e.g. `bash: [exit code: 137] OOM`) reveal where a model tends to fail.
+- **Top-5 tools / Top-5 error signatures** — per-model most-used tools (with a per-tool error-rate column: 0 gray / <5% amber / ≥5% red); normalized high-frequency error patterns (e.g. `bash: [exit code: 137] OOM`) reveal where a model tends to fail.
+- **Multi-model compare (≤4)** — tick several models to open a compare view: one card per model with side-by-side metrics (best/worst/top tones), a Top-10 tools matrix, Top-5 error signatures, and a mini daily calls/errors bar chart (today's errors marked red); fewer than 2 valid selections falls back to the single-model detail.
 - **Time-range filter** — All / Last 7 / Last 30 / Last 90 days / Today / Yesterday (anchored to the max date in the data, resilient to system clock drift).
 - **Read-only** — analysis and display only, never mutates session data; the route validates a client header plus Origin/Referer and returns 403 on cross-origin requests.
 - **Incremental caching** — per-file mtime baseline with background scanning (60s incremental / 24h full re-scan); while the initial scan is still running the route falls back to the last cache or mock data, so it never blocks.
